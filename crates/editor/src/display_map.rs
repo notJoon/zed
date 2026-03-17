@@ -2465,12 +2465,16 @@ impl std::ops::Deref for DisplaySnapshot {
     }
 }
 
-// Matches tree-sitter node kinds that represent multiline literals whose interior
-// indentation is content, not code structure. We match by substring because
-// grammars use varied names across languages (e.g. `string_literal`, `raw_string`,
-// `block_comment`, `heredoc_body`).
+// Matched by substring because tree-sitter grammars use varied node kind names
+// across languages (e.g. `string_literal`, `raw_string`, `block_comment`).
+// "heredoc" is separate because those nodes don't contain "string" or "comment"
+// in their names (e.g. `heredoc_body` in Bash, Ruby, Perl).
+const MULTILINE_LITERAL_NODE_PATTERNS: &[&str] = &["string", "comment", "heredoc"];
+
 fn is_multiline_literal_node(kind: &str) -> bool {
-    kind.contains("string") || kind.contains("comment") || kind.contains("heredoc")
+    MULTILINE_LITERAL_NODE_PATTERNS
+        .iter()
+        .any(|pattern| kind.contains(pattern))
 }
 
 /// A zero-indexed point in a text buffer consisting of a row and column adjusted for inserted blocks.
