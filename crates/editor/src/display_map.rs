@@ -2362,15 +2362,17 @@ impl DisplaySnapshot {
         }
     }
 
+    // Returns the end row of a multiline literal node containing `row`, so
+    // the indent-based fold scan can skip past content whose indentation is
+    // not structurally meaningful.
     fn multiline_literal_end_row(&self, row: u32) -> Option<u32> {
         let point = Point::new(row, 0);
         let (node, _) = self.buffer_snapshot().syntax_ancestor(point..point)?;
 
         let mut current = node;
         loop {
-            let kind = current.kind();
             if current.start_position().row != current.end_position().row
-                && (kind.contains("string") || kind.contains("comment") || kind.contains("heredoc"))
+                && is_multiline_literal_node(current.kind())
             {
                 return Some(current.end_position().row as u32);
             }
@@ -2461,6 +2463,14 @@ impl std::ops::Deref for DisplaySnapshot {
     fn deref(&self) -> &Self::Target {
         &self.block_snapshot
     }
+}
+
+// Matches tree-sitter node kinds that represent multiline literals whose interior
+// indentation is content, not code structure. We match by substring because
+// grammars use varied names across languages (e.g. `string_literal`, `raw_string`,
+// `block_comment`, `heredoc_body`).
+fn is_multiline_literal_node(kind: &str) -> bool {
+    kind.contains("string") || kind.contains("comment") || kind.contains("heredoc")
 }
 
 /// A zero-indexed point in a text buffer consisting of a row and column adjusted for inserted blocks.
