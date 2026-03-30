@@ -1279,9 +1279,6 @@ impl GitRepository for RealGitRepository {
     }
 
     fn load_index_text(&self, path: RepoPath) -> BoxFuture<'_, Option<String>> {
-        // https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
-        const GIT_MODE_SYMLINK: u32 = 0o120000;
-
         let repo = self.repository.clone();
         self.executor
             .spawn(async move {
@@ -1297,9 +1294,6 @@ impl GitRepository for RealGitRepository {
                     let Some(entry) = index.get_path(path.as_std_path(), STAGE_NORMAL) else {
                         return Ok(None);
                     };
-                    if entry.mode == GIT_MODE_SYMLINK {
-                        return Ok(None);
-                    }
 
                     let content = repo.find_blob(entry.id)?.content().to_owned();
                     Ok(String::from_utf8(content).ok())
@@ -1326,9 +1320,6 @@ impl GitRepository for RealGitRepository {
                     let Some(entry) = head.get_path(path.as_std_path()).ok() else {
                         return Ok(None);
                     };
-                    if entry.filemode() == i32::from(git2::FileMode::Link) {
-                        return Ok(None);
-                    }
                     let content = repo.find_blob(entry.id())?.content().to_owned();
                     Ok(String::from_utf8(content).ok())
                 }

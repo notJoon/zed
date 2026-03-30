@@ -1401,15 +1401,25 @@ impl LocalWorktree {
             //       if it is too large
             //       5GB seems to be more reasonable, peaking at ~16GB, while 6GB jumps up to >24GB which seems like a
             //       reasonable limit
+            let (text, encoding, has_bom) = if let Ok(Some(metadata)) = fs.metadata(&abs_path).await
             {
                 const FILE_SIZE_MAX: u64 = 6 * 1024 * 1024 * 1024; // 6GB
-                if let Ok(Some(metadata)) = fs.metadata(&abs_path).await
-                    && metadata.len >= FILE_SIZE_MAX
-                {
+                if metadata.len >= FILE_SIZE_MAX {
                     anyhow::bail!("File is too large to load");
                 }
-            }
-            let (text, encoding, has_bom) = decode_file_text(fs.as_ref(), &abs_path).await?;
+                if metadata.is_symlink {
+                    let target = fs.read_link(&abs_path).await?;
+                    (
+                        target.to_string_lossy().to_string(),
+                        encoding_rs::UTF_8,
+                        false,
+                    )
+                } else {
+                    decode_file_text(fs.as_ref(), &abs_path).await?
+                }
+            } else {
+                decode_file_text(fs.as_ref(), &abs_path).await?
+            };
 
             let worktree = this.upgrade().context("worktree was dropped")?;
             let file = match entry.await? {
