@@ -9462,6 +9462,74 @@ async fn test_single_file_diffs(cx: &mut gpui::TestAppContext) {
     });
 }
 
+// Regression test for https://github.com/zed-industries/zed/issues/52291
+// Symlink diff preview should show the symlink target path, not the resolved file contents.
+#[gpui::test]
+#[cfg(not(windows))]
+async fn test_symlink_diff_shows_link_target_not_file_contents(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+    cx.executor().allow_parking();
+
+    let target_file_contents = "SECRET_KEY=abc123\n";
+    let symlink_target_path = "../.env";
+
+    let root = TempTree::new(json!({
+        "project": {
+            ".env": target_file_contents,
+            "backend": {}
+        },
+    }));
+
+    let work_dir = root.path().join("project");
+    let repo = git_init(work_dir.as_path());
+
+    // Create a symlink: backend/.env -> ../.env
+    os::unix::fs::symlink(symlink_target_path, work_dir.join("backend/.env")).unwrap();
+
+    // Commit a dummy file so we have an initial commit
+    std::fs::write(work_dir.join("init"), "").unwrap();
+    git_add(Path::new("init"), &repo);
+    git_commit("Initial commit", &repo);
+
+    // Stage the symlink
+    git_add(Path::new("backend/.env"), &repo);
+
+    // Verify git sees it as a symlink (mode 120000)
+    let index = repo.index().unwrap();
+    let entry = index.get_path(Path::new("backend/.env"), 0).unwrap();
+    assert_eq!(
+        entry.mode, 0o120000,
+        "git should record the symlink with mode 120000"
+    );
+
+    let project = Project::test(
+        Arc::new(RealFs::new(None, cx.executor())),
+        [work_dir.as_ref()],
+        cx,
+    )
+    .await;
+
+    cx.run_until_parked();
+
+    let buffer = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer(work_dir.join("backend/.env"), cx)
+        })
+        .await
+        .unwrap();
+
+    let buffer_text = buffer.read_with(cx, |buffer, _| buffer.text());
+
+    // The buffer should contain the symlink target path, not the resolved file contents.
+    assert_eq!(
+        buffer_text.trim(),
+        symlink_target_path,
+        "Buffer for a symlink should show the link target path '{}', not the resolved file contents '{}'",
+        symlink_target_path,
+        target_file_contents.trim(),
+    );
+}
+
 // TODO: Should we test this on Windows also?
 #[gpui::test]
 #[cfg(not(windows))]
