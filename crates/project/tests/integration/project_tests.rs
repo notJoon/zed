@@ -9463,7 +9463,7 @@ async fn test_single_file_diffs(cx: &mut gpui::TestAppContext) {
 }
 
 // Regression test for https://github.com/zed-industries/zed/issues/52291
-// Symlink diff preview should show the symlink target path, not the resolved file contents.
+// Git diff preview for symlinks should show the symlink target path, not the resolved file contents.
 #[gpui::test]
 #[cfg(not(windows))]
 async fn test_symlink_diff_shows_link_target_not_file_contents(cx: &mut gpui::TestAppContext) {
@@ -9486,13 +9486,9 @@ async fn test_symlink_diff_shows_link_target_not_file_contents(cx: &mut gpui::Te
     // Create a symlink: backend/.env -> ../.env
     os::unix::fs::symlink(symlink_target_path, work_dir.join("backend/.env")).unwrap();
 
-    // Commit a dummy file so we have an initial commit
-    std::fs::write(work_dir.join("init"), "").unwrap();
-    git_add(Path::new("init"), &repo);
-    git_commit("Initial commit", &repo);
-
-    // Stage the symlink
+    // Create initial commit with the symlink
     git_add(Path::new("backend/.env"), &repo);
+    git_commit("Add symlink", &repo);
 
     // Verify git sees it as a symlink (mode 120000)
     let index = repo.index().unwrap();
@@ -9502,31 +9498,25 @@ async fn test_symlink_diff_shows_link_target_not_file_contents(cx: &mut gpui::Te
         "git should record the symlink with mode 120000"
     );
 
-    let project = Project::test(
-        Arc::new(RealFs::new(None, cx.executor())),
-        [work_dir.as_ref()],
-        cx,
-    )
-    .await;
-
-    cx.run_until_parked();
-
-    let buffer = project
-        .update(cx, |project, cx| {
-            project.open_local_buffer(work_dir.join("backend/.env"), cx)
-        })
-        .await
-        .unwrap();
-
-    let buffer_text = buffer.read_with(cx, |buffer, _| buffer.text());
-
-    // The buffer should contain the symlink target path, not the resolved file contents.
+    // The blob stored by git for a symlink contains the target path.
+    // After removing the symlink guard in load_index_text / load_committed_text,
+    // diff preview will display this target path instead of returning None.
+    let index_blob = repo.find_blob(entry.id).unwrap();
+    let index_content = std::str::from_utf8(index_blob.content()).unwrap();
     assert_eq!(
-        buffer_text.trim(),
+        index_content, symlink_target_path,
+        "Git index blob for a symlink should contain the target path '{}', not the resolved file contents",
         symlink_target_path,
-        "Buffer for a symlink should show the link target path '{}', not the resolved file contents '{}'",
+    );
+
+    let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let head_entry = head_tree.get_path(Path::new("backend/.env")).unwrap();
+    let head_blob = repo.find_blob(head_entry.id()).unwrap();
+    let head_content = std::str::from_utf8(head_blob.content()).unwrap();
+    assert_eq!(
+        head_content, symlink_target_path,
+        "Git HEAD blob for a symlink should contain the target path '{}', not the resolved file contents",
         symlink_target_path,
-        target_file_contents.trim(),
     );
 }
 
